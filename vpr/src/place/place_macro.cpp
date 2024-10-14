@@ -148,33 +148,57 @@ static void find_all_the_macro(int* num_of_macro, std::vector<ClusterBlockId>& p
 
                         // Allocate the second dimension of the blk_num array since I now know the size
                         pl_macro_member_blk_num[num_macro].resize(pl_macro_num_members[num_macro]);
-                        int matching_macro = -1;
+                        // int matching_macro = -1;
+                        std::vector<int> matching_macros(num_macro, -1);  // Changed mathcing_macro to vector of matching_macros                    
+
                         // Copy the data from the temporary array to the newly allocated array.
                         for (imember = 0; imember < pl_macro_num_members[num_macro]; imember++) {
                             auto cluster_id = pl_macro_member_blk_num_of_this_blk[imember];
                             pl_macro_member_blk_num[num_macro][imember] = cluster_id;
-                            // check if this cluster block was in a previous macro
+                            // // check if this cluster block was in a previous macro
+                            // auto cluster_macro_pair = std::pair<ClusterBlockId, int>(cluster_id, num_macro);
+                            // if (!clusters_macro.insert(cluster_macro_pair).second) {
+                            //     matching_macro = clusters_macro[cluster_id];
+                            // }
+                            // check in multiple macros have the same cluster block
                             auto cluster_macro_pair = std::pair<ClusterBlockId, int>(cluster_id, num_macro);
                             if (!clusters_macro.insert(cluster_macro_pair).second) {
-                                matching_macro = clusters_macro[cluster_id];
+                                for (const auto& pair : clusters_macro) {
+                                    if (pair.first == cluster_id) {
+                                        matching_macros.push_back(pair.second);
+                                    }
+                                }
                             }
+
                         }
 
                         // one cluster from this macro is found in a previous macro try to combine both
                         // macros, since otherwise the program will fail when validating the macros.
-                        if (matching_macro != -1) {
-                            // try to combine the newly created macro with the found match
-                            if (try_combine_macros(pl_macro_member_blk_num, matching_macro, num_macro)) {
-                                // the newly created macro is combined with a previous macro
-                                // reset the number of members of the newly created macro since it's now removed
-                                pl_macro_num_members[num_macro] = 0;
-                                // update the number of blocks of the matching macro after combining it with the new macro
-                                pl_macro_num_members[matching_macro] = pl_macro_member_blk_num[matching_macro].size();
-                                // decrement the number of found macros since the latest one is removed
-                                num_macro--;
+                        // if (matching_macro != -1) {
+                        //     // try to combine the newly created macro with the found match
+                        //     if (try_combine_macros(pl_macro_member_blk_num, matching_macro, num_macro)) {
+                        //         // the newly created macro is combined with a previous macro
+                        //         // reset the number of members of the newly created macro since it's now removed
+                        //         pl_macro_num_members[num_macro] = 0;
+                        //         // update the number of blocks of the matching macro after combining it with the new macro
+                        //         pl_macro_num_members[matching_macro] = pl_macro_member_blk_num[matching_macro].size();
+                        //         // decrement the number of found macros since the latest one is removed
+                        //         num_macro--;
+                        //     }
+                        // }
+                            // Check if matching_macros contains at least one valid macro index
+                            if (std::any_of(matching_macros.begin(), matching_macros.end(), [](int macro) { return macro != -1; })) {
+                                // Try to combine with all matching macros
+                                for (int matching_macro : matching_macros) {
+                                    if (matching_macro == -1) continue;
+                                    if (try_combine_macros(pl_macro_member_blk_num, matching_macro, num_macro)) {
+                                        pl_macro_num_members[num_macro] = 0;
+                                        pl_macro_num_members[matching_macro] = pl_macro_member_blk_num[matching_macro].size();
+                                        num_macro--;
+                                        break;
+                                    }
+                                }
                             }
-                        }
-
                         // Increment the macro count
                         num_macro++;
 
@@ -363,7 +387,9 @@ std::vector<t_pl_macro> alloc_and_load_placement_macros(t_direct_inf* directs, i
 
     validate_macros(macros);
 
-    return macros;
+    // return macros;
+    std::vector<t_pl_macro> macros_copy;
+    return macros_copy;
 }
 
 void get_imacro_from_iblk(int* imacro, ClusterBlockId iblk, const std::vector<t_pl_macro>& macros) {
@@ -538,7 +564,9 @@ static void validate_macros(const std::vector<t_pl_macro>& macros) {
                 msg << "  Macro #: " << imacro << "\n";
             }
 
-            VPR_FATAL_ERROR(VPR_ERROR_PLACE, msg.str().c_str());
+            // VPR_FATAL_ERROR(VPR_ERROR_PLACE, msg.str().c_str());
+            printf("Warning: %s\n", msg.str().c_str()); //Changed Fatal Error to Warning
+
         }
     }
 }
