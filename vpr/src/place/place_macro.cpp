@@ -1,7 +1,3 @@
-#include <iostream>
-#include <vector>
-// ruthwik: added for printing sizes in 155
-
 #include <cstdio>
 #include <cmath>
 #include <sstream>
@@ -104,10 +100,6 @@ static void find_all_the_macro(int* num_of_macro, std::vector<ClusterBlockId>& p
                         && !net_is_driven_by_direct(to_net_id)))) {
                 for (from_iblk_pin = 0; from_iblk_pin < num_blk_pins; from_iblk_pin++) {
                     int from_physical_pin = get_physical_pin(physical_tile, logical_block, from_iblk_pin);
-                    // std::cout << "first occurance inside for loop from_iblk_pin: " << from_iblk_pin << std::endl;  //ruthwik
-                    // std::cout << "num_blk_pins: " << num_blk_pins << std::endl;  //ruthwik
-                    // std::cout << "from_physical_pin: " << from_physical_pin << std::endl;  //ruthwik
-
 
                     from_net_id = cluster_ctx.clb_nlist.block_net(blk_id, from_iblk_pin);
                     from_idirect = f_idirect_from_blk_pin[physical_tile->index][from_physical_pin];
@@ -153,35 +145,22 @@ static void find_all_the_macro(int* num_of_macro, std::vector<ClusterBlockId>& p
                             pl_macro_num_members[num_macro]++;
 
                         } // Found all the members of this macro at this point
-                        std::cout << "After finding all members of macro: pl_macro_num_members[num_macro]: " << pl_macro_num_members[num_macro] << std::endl;  //ruthwik
 
                         // Allocate the second dimension of the blk_num array since I now know the size
                         pl_macro_member_blk_num[num_macro].resize(pl_macro_num_members[num_macro]);
                         // int matching_macro = -1;
-                        std::vector<int> matching_macros(num_macro, -1);  // added ruthwik
-                        // std::cout << "num_macro: " << num_macro << std::endl;  //ruthwik
-                        // std::cout << "from_iblk_pin: " << from_iblk_pin << std::endl;  //ruthwik
-                        // std::cout << "pl_macro_member_blk_num size[0]: " << pl_macro_member_blk_num.size() << std::endl;
-                        // std::cout << "pl_macro_member_blk_num[0]: " << pl_macro_member_blk_num[0] << std::endl;
-                    
+                        std::vector<int> matching_macros(num_macro, -1);  // Changed mathcing_macro to vector of matching_macros                    
 
                         // Copy the data from the temporary array to the newly allocated array.
                         for (imember = 0; imember < pl_macro_num_members[num_macro]; imember++) {
                             auto cluster_id = pl_macro_member_blk_num_of_this_blk[imember];
-                            // Debug prints : Ruthwik
-                            // std::cout << "num_macro: " << num_macro << std::endl;
-                            // std::cout << "imember: " << imember << std::endl;
-                            // std::cout << "pl_macro_member_blk_num size: " << pl_macro_member_blk_num.size() << std::endl;
-                            // std::cout << "pl_macro_member_blk_num[" << num_macro << "] size: " << pl_macro_member_blk_num[num_macro].size() << std::endl;
-
-                            //debug prints end
                             pl_macro_member_blk_num[num_macro][imember] = cluster_id;
                             // // check if this cluster block was in a previous macro
                             // auto cluster_macro_pair = std::pair<ClusterBlockId, int>(cluster_id, num_macro);
                             // if (!clusters_macro.insert(cluster_macro_pair).second) {
                             //     matching_macro = clusters_macro[cluster_id];
                             // }
-                            // check in multiple macros : ruthwik
+                            // check in multiple macros have the same cluster block
                             auto cluster_macro_pair = std::pair<ClusterBlockId, int>(cluster_id, num_macro);
                             if (!clusters_macro.insert(cluster_macro_pair).second) {
                                 for (const auto& pair : clusters_macro) {
@@ -207,7 +186,7 @@ static void find_all_the_macro(int* num_of_macro, std::vector<ClusterBlockId>& p
                         //         num_macro--;
                         //     }
                         // }
-                                // Check if matching_macros contains at least one valid macro index
+                            // Check if matching_macros contains at least one valid macro index
                             if (std::any_of(matching_macros.begin(), matching_macros.end(), [](int macro) { return macro != -1; })) {
                                 // Try to combine with all matching macros
                                 for (int matching_macro : matching_macros) {
@@ -220,17 +199,6 @@ static void find_all_the_macro(int* num_of_macro, std::vector<ClusterBlockId>& p
                                     }
                                 }
                             }
-                            // ruthwik  debug prints
-                            std::cout << "Just before incrementing num_macro s: " ;
-                            std::cout << "num_macro: " << num_macro << std::endl;
-                            // std::cout << "imember: " << imember << std::endl;
-                            std::cout << "pl_macro_member_blk_num size: " << pl_macro_member_blk_num.size() << std::endl;
-                            std::cout << "pl_macro_member_blk_num[" << num_macro << "] size: " << pl_macro_member_blk_num[num_macro].size() << std::endl;
-                            std::cout << "pl_macro_member_blk_num[" << num_macro << "]: ";
-                            for (const auto& blk : pl_macro_member_blk_num[num_macro]) {
-                                std::cout << blk << " ";
-                            }
-                            std::cout << std::endl;
                         // Increment the macro count
                         num_macro++;
 
@@ -381,14 +349,6 @@ std::vector<t_pl_macro> alloc_and_load_placement_macros(t_direct_inf* directs, i
     std::vector<int> pl_macro_num_members(cluster_ctx.clb_nlist.blocks().size());
     std::vector<std::vector<ClusterBlockId>> pl_macro_member_blk_num(cluster_ctx.clb_nlist.blocks().size());
     std::vector<ClusterBlockId> pl_macro_member_blk_num_of_this_blk(cluster_ctx.clb_nlist.blocks().size());
-    // Added cout for debugging :Ruthwik
-    // std::cout << "pl_macro_idirect SIZE INSIDE ALLOC AND LOAD PLACEMENT MACROS::: " << pl_macro_idirect.size() << std::endl; //RUTHWIK
-
-    // std::vector<int> pl_macro_idirect(10000);
-    // std::vector<int> pl_macro_num_members(10000);
-    // std::vector<std::vector<ClusterBlockId>> pl_macro_member_blk_num(10000);
-    // std::vector<ClusterBlockId> pl_macro_member_blk_num_of_this_blk(10000);
-    std::cout << "pl_macro_idirect SIZE INSIDE ALLOC AND LOAD PLACEMENT MACROS::: " << pl_macro_idirect.size() << std::endl; //RUTHWIK
 
     /* Sets up the required variables. */
     alloc_and_load_idirect_from_blk_pin(directs, num_directs,
@@ -604,7 +564,9 @@ static void validate_macros(const std::vector<t_pl_macro>& macros) {
                 msg << "  Macro #: " << imacro << "\n";
             }
 
-            // VPR_FATAL_ERROR(VPR_ERROR_PLACE, msg.str().c_str()); //commented error ruthwik
+            // VPR_FATAL_ERROR(VPR_ERROR_PLACE, msg.str().c_str());
+            printf("Warning: %s\n", msg.str().c_str()); //Changed Fatal Error to Warning
+
         }
     }
 }
