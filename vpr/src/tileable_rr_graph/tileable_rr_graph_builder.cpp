@@ -81,8 +81,7 @@ void build_tileable_unidir_rr_graph(const std::vector<t_physical_tile_type>& typ
                                     const float R_minW_nmos,
                                     const float R_minW_pmos,
                                     const enum e_base_cost_type& base_cost_type,
-                                    const t_direct_inf* directs,
-                                    const int& num_directs,
+                                    const std::vector<t_direct_inf>& directs,
                                     int* wire_to_rr_ipin_switch,
                                     const bool& shrink_boundary,
                                     const bool& perimeter_cb,
@@ -156,12 +155,16 @@ void build_tileable_unidir_rr_graph(const std::vector<t_physical_tile_type>& typ
     std::vector<t_segment_inf> segment_inf_x = get_parallel_segs(segment_inf, segment_index_map, X_AXIS, true);
     std::vector<t_segment_inf> segment_inf_y = get_parallel_segs(segment_inf, segment_index_map, Y_AXIS, true);
 
+    /* Get vib grid */
+    const auto& vib_grid = device_ctx.vib_grid;
+    //const bool is_vib_arch = !device_ctx.arch->vib_infs.empty();
+
     /************************
      * Allocate the rr_nodes
      ************************/
     alloc_tileable_rr_graph_nodes(device_ctx.rr_graph_builder,
                                   rr_node_driver_switches,
-                                  grids, 0,
+                                  grids, vib_grid, 0,
                                   device_chan_width,
                                   segment_inf_x, segment_inf_y,
                                   device_grid_annotation,
@@ -177,7 +180,7 @@ void build_tileable_unidir_rr_graph(const std::vector<t_physical_tile_type>& typ
                                    rr_node_driver_switches,
                                    rr_node_track_ids,
                                    device_ctx.rr_rc_data,
-                                   grids, 0,
+                                   grids, vib_grid, 0,
                                    device_chan_width,
                                    segment_inf_x, segment_inf_y,
                                    segment_index_map,
@@ -254,14 +257,15 @@ void build_tileable_unidir_rr_graph(const std::vector<t_physical_tile_type>& typ
     build_rr_graph_edges(device_ctx.rr_graph,
                          device_ctx.rr_graph_builder,
                          rr_node_driver_switches,
-                         grids, 0,
+                         grids, vib_grid, 0,
                          device_chan_width,
                          segment_inf, segment_inf_x, segment_inf_y,
                          Fc_in, Fc_out,
                          sb_type, Fs, sb_subtype, subFs,
                          perimeter_cb,
                          opin2all_sides, concat_wire,
-                         wire_opposite_side);
+                         wire_opposite_side,
+                         delayless_rr_switch);
 
     /************************************************************************
      * Build direction connection lists
@@ -269,20 +273,18 @@ void build_tileable_unidir_rr_graph(const std::vector<t_physical_tile_type>& typ
      ***********************************************************************/
     /* Create data structure of direct-connections */
     t_clb_to_clb_directs* clb_to_clb_directs = NULL;
-    if (num_directs > 0) {
-        clb_to_clb_directs = alloc_and_load_clb_to_clb_directs(directs, num_directs, delayless_switch);
+    if (!directs.empty()) {
+        clb_to_clb_directs = alloc_and_load_clb_to_clb_directs(directs, delayless_switch);
     }
-    std::vector<t_direct_inf> arch_directs;
     std::vector<t_clb_to_clb_directs> clb2clb_directs;
-    for (int idirect = 0; idirect < num_directs; ++idirect) {
-        arch_directs.push_back(directs[idirect]);
+    for (size_t idirect = 0; idirect < directs.size(); ++idirect) {
         /* Sanity checks on rr switch id */
         VTR_ASSERT(true == device_ctx.rr_graph.valid_switch(RRSwitchId(clb_to_clb_directs[idirect].switch_index)));
         clb2clb_directs.push_back(clb_to_clb_directs[idirect]);
     }
 
     build_rr_graph_direct_connections(device_ctx.rr_graph, device_ctx.rr_graph_builder, device_ctx.grid, 0,
-                                      arch_directs, clb2clb_directs);
+                                      directs, clb2clb_directs);
 
     /* Allocate and load routing resource switches, which are derived from the switches from the architecture file,
      * based on their fanin in the rr graph. This routine also adjusts the rr nodes to point to these new rr switches */
@@ -320,7 +322,9 @@ void build_tileable_unidir_rr_graph(const std::vector<t_physical_tile_type>& typ
     }
 
     /* No clock network support yet; Does not support flatten rr_graph yet */
-    check_rr_graph(device_ctx.rr_graph, types, device_ctx.rr_indexed_data, grids, device_ctx.chan_width, GRAPH_UNIDIR, false);
+
+    check_rr_graph(device_ctx.rr_graph, types, device_ctx.rr_indexed_data, grids, vib_grid, device_ctx.chan_width, GRAPH_UNIDIR, false);
+
 
     /************************************************************************
      * Free all temp stucts

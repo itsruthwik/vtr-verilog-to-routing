@@ -534,7 +534,7 @@ class RrGraphSerializer final : public uxsd::RrGraphBase<RrGraphContextTypes> {
             }
         }
         if (!found_arch_name) {
-            report_error("Switch name '%s' not found in architecture\n", string_name.c_str());
+            VTR_LOG("Switch name '%s' found in RR graph input from file but not in the architecture file; creating it.\n", string_name.c_str());
         }
         sw->intra_tile = is_internal_sw;
         sw->name = string_name;
@@ -1456,7 +1456,7 @@ class RrGraphSerializer final : public uxsd::RrGraphBase<RrGraphContextTypes> {
             report_error(
                 "Incorrect number of pins (%zu != %u) in %zu pin_class in block %s",
                 size, class_inf->num_pins,
-                class_idx, tile->name);
+                class_idx, tile->name.c_str());
         }
     }
     inline const std::pair<const t_physical_tile_type*, int> add_pin_class_pin(std::tuple<const t_physical_tile_type*, const t_class*, int>& context, int ptc) final {
@@ -1479,7 +1479,7 @@ class RrGraphSerializer final : public uxsd::RrGraphBase<RrGraphContextTypes> {
             report_error(
                 "Incorrect number of pins (%zu != %u) in %zu pin_class in block %s",
                 pin_count, class_inf->num_pins,
-                class_idx, tile->name);
+                class_idx, tile->name.c_str());
         }
     }
 
@@ -1518,7 +1518,7 @@ class RrGraphSerializer final : public uxsd::RrGraphBase<RrGraphContextTypes> {
         return tile->index;
     }
     inline const char* get_block_type_name(const t_physical_tile_type*& tile) final {
-        return tile->name;
+        return tile->name.c_str();
     }
     inline int get_block_type_width(const t_physical_tile_type*& tile) final {
         return tile->width;
@@ -1543,10 +1543,10 @@ class RrGraphSerializer final : public uxsd::RrGraphBase<RrGraphContextTypes> {
      */
     inline void set_block_type_name(const char* name, std::pair<const t_physical_tile_type*, int>& context) final {
         const t_physical_tile_type* tile = context.first;
-        if (strcmp(tile->name, name) != 0) {
+        if (tile->name != name) {
             report_error(
                 "Architecture file does not match RR graph's block name: arch uses name %s, RR graph uses name %s",
-                tile->name, name);
+                tile->name.c_str(), name);
         }
     }
 
@@ -1837,10 +1837,12 @@ class RrGraphSerializer final : public uxsd::RrGraphBase<RrGraphContextTypes> {
         read_rr_graph_filename_->assign(read_rr_graph_name_);
 
         if (do_check_rr_graph_) {
+            const VibDeviceGrid vib_grid_;
             check_rr_graph(*rr_graph_,
                            physical_tile_types_,
                            *rr_indexed_data_,
                            grid_,
+                           vib_grid_,
                            *chan_width_,
                            graph_type_,
                            is_flat_);
@@ -2032,6 +2034,8 @@ class RrGraphSerializer final : public uxsd::RrGraphBase<RrGraphContextTypes> {
                 return OPIN;
             case uxsd::enum_node_type::IPIN:
                 return IPIN;
+            case uxsd::enum_node_type::MEDIUM:
+                return MEDIUM;
             default:
                 report_error(
                     "Invalid node type %d",
@@ -2052,6 +2056,8 @@ class RrGraphSerializer final : public uxsd::RrGraphBase<RrGraphContextTypes> {
                 return uxsd::enum_node_type::OPIN;
             case IPIN:
                 return uxsd::enum_node_type::IPIN;
+            case MEDIUM:
+                return uxsd::enum_node_type::MEDIUM;
             default:
                 report_error(
                     "Invalid type %d", type);

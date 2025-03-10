@@ -67,7 +67,7 @@ static float do_one_route(RRNodeId source_node,
 
     // Find the cheapest route if possible.
     bool found_path;
-    t_heap cheapest;
+    RTExploredNode cheapest;
     ConnectionParameters conn_params(ParentNetId::INVALID(),
                                      -1,
                                      false,
@@ -164,8 +164,7 @@ TEST_CASE("connection_router", "[vpr]") {
         vpr_setup.RouterOpts,
         &vpr_setup.RoutingArch,
         vpr_setup.Segments,
-        arch.Directs,
-        arch.num_directs,
+        arch.directs,
         router_opts.flat_routing);
 
     // Find a source and sink to route

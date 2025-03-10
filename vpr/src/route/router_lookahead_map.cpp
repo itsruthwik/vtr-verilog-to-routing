@@ -204,6 +204,14 @@ float MapLookahead::get_expected_cost_flat_router(RRNodeId current_node, RRNodeI
     t_physical_tile_type_ptr from_physical_type = device_ctx.grid.get_physical_type({rr_graph.node_xlow(current_node),
                                                                                      rr_graph.node_ylow(current_node),
                                                                                      rr_graph.node_layer(current_node)});
+    const VibInf* vib;
+    if (!device_ctx.arch->vib_infs.empty()) {
+        vib = device_ctx.vib_grid.get_vib(rr_graph.node_layer(current_node), rr_graph.node_xlow(current_node), rr_graph.node_ylow(current_node));
+    }
+    else {
+        vib = nullptr;
+    }
+    //const t_vib_inf* vib = device_ctx.vib_grid[rr_graph.node_layer(current_node)][rr_graph.node_xlow(current_node)][rr_graph.node_ylow(current_node)];
     int from_node_ptc_num = rr_graph.node_ptc_num(current_node);
     t_physical_tile_type_ptr to_physical_type = device_ctx.grid.get_physical_type({rr_graph.node_xlow(target_node),
                                                                                    rr_graph.node_ylow(target_node),
@@ -224,7 +232,12 @@ float MapLookahead::get_expected_cost_flat_router(RRNodeId current_node, RRNodeI
 
         return delay_cost + cong_cost + delay_offset_cost + cong_offset_cost;
     } else if (from_rr_type == OPIN) {
-        if (is_inter_cluster_node(rr_graph, current_node)) {
+
+        if (is_inter_cluster_node(from_physical_type,
+                                  vib,
+                                  from_rr_type,
+                                  from_node_ptc_num)) {
+
             // Similar to CHANX and CHANY
             std::tie(delay_cost, cong_cost) = get_expected_delay_and_cong(current_node, target_node, params, R_upstream);
 
@@ -330,11 +343,23 @@ std::pair<float, float> MapLookahead::get_expected_delay_and_cong(RRNodeId from_
 
         auto from_ptc = rr_graph.node_ptc_num(from_node);
 
-        std::tie(expected_delay_cost, expected_cong_cost) = util::get_cost_from_src_opin(src_opin_delays[from_layer_num][from_tile_index][from_ptc][to_layer_num],
-                                                                                         delta_x,
-                                                                                         delta_y,
-                                                                                         to_layer_num,
-                                                                                         get_wire_cost_entry);
+        /* We could reach the sink by using an intermediate wire on any reachable layer. We consider all these options and return the minimum cost one. 
+         * get_cost_from_src_opin iterates over all routing segments passed to it (the first argument) and returns 
+         * the minimum cost among them. In the following for loop, we iterate over each layer and pass it the 
+         * routing segments on that layer reachable from the OPIN/SOURCE to segments on that layer. This for loop then calculates and returns 
+         * the minimum cost from the given OPIN/SOURCE to the specified SINK considering routing options across all layers.
+         */ 
+        for (int layer_num = 0; layer_num < device_ctx.grid.get_num_layers(); layer_num++) {
+            float this_delay_cost;
+            float this_cong_cost;
+            std::tie(this_delay_cost, this_cong_cost) = util::get_cost_from_src_opin(src_opin_delays[from_layer_num][from_tile_index][from_ptc][layer_num],
+                                                                                            delta_x,
+                                                                                            delta_y,
+                                                                                            to_layer_num,
+                                                                                            get_wire_cost_entry);
+            expected_delay_cost = std::min(expected_delay_cost, this_delay_cost);
+            expected_cong_cost = std::min(expected_cong_cost, this_cong_cost);
+        }
 
         expected_delay_cost *= params.criticality;
         expected_cong_cost *= (1 - params.criticality);
@@ -495,12 +520,12 @@ static void compute_router_wire_lookahead(const std::vector<t_segment_inf>& segm
     auto& grid = device_ctx.grid;
 
     //Re-allocate
-    f_wire_cost_map = t_wire_cost_map({static_cast<unsigned long>(grid.get_num_layers()), 
-                                        static_cast<unsigned long>(grid.get_num_layers()), 
-                                        2,
-                                        segment_inf_vec.size(),
-                                        device_ctx.grid.width(),
-                                        device_ctx.grid.height()});
+    f_wire_cost_map = t_wire_cost_map({static_cast<unsigned long>(grid.get_num_layers()),
+                                       static_cast<unsigned long>(grid.get_num_layers()),
+                                       2,
+                                       segment_inf_vec.size(),
+                                       device_ctx.grid.width(),
+                                       device_ctx.grid.height()});
 
     int longest_seg_length = 0;
     for (const auto& seg_inf : segment_inf_vec) {
@@ -524,7 +549,7 @@ static void compute_router_wire_lookahead(const std::vector<t_segment_inf>& segm
                                                                                        chan_type,
                                                                                        segment_inf,
                                                                                        std::unordered_map<int, std::unordered_set<int>>(),
-                                                                                       true);
+                                                                                       /*sample_all_locs=*/true);
                 if (routing_cost_map.empty()) {
                     continue;
                 }

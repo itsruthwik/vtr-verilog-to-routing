@@ -228,10 +228,16 @@ class RRGraphView {
     inline short node_layer(RRNodeId node) const {
         return node_storage_.node_layer(node);
     }
-
-    /** @brief Return the ptc number twist of a specified node.
-    */
-    inline short node_ptc_twist(RRNodeId node) const {
+  
+    inline short node_bend_start(RRNodeId node) const {
+        return node_storage_.node_bend_start(node);
+    }
+    inline short node_bend_end(RRNodeId node) const {
+        return node_storage_.node_bend_end(node);
+    }
+    
+     /** @brief Get the ptc number twist of a routing resource node. This function is inlined for runtime optimization. */
+    inline short node_ptc_twist(RRNodeId node) const{
         return node_storage_.node_ptc_twist(node);
     }
 
@@ -351,7 +357,7 @@ class RRGraphView {
             coordinate_string += " length:" + std::to_string(node_length(node)); //add the length of the segment
             //Figure out the starting and ending coordinate of the segment depending on the direction
 
-            arrow = "->"; //we will point the coordinates from start to finish, left to right
+            arrow = " ->"; //we will point the coordinates from start to finish, left to right
 
             if (node_direction(node) == Direction::DEC) { //signal travels along decreasing direction
 
@@ -371,7 +377,7 @@ class RRGraphView {
                 end_y = std::to_string(node_yhigh(node)) + ",";
                 end_layer_str = std::to_string(node_layer_num) + ")"; //layer number
                 if (node_direction(node) == Direction::BIDIR) {
-                    arrow = "<->"; //indicate that signal can travel both direction
+                    arrow = " <->"; //indicate that signal can travel both direction
                 }
             }
         }

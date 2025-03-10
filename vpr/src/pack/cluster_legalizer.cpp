@@ -19,7 +19,6 @@
 #include "atom_netlist.h"
 #include "cluster_placement.h"
 #include "cluster_router.h"
-#include "cluster_util.h"
 #include "globals.h"
 #include "logic_types.h"
 #include "netlist_utils.h"
@@ -80,7 +79,7 @@ static size_t calc_max_cluster_size(const std::vector<t_logical_block_type>& log
  *
  * Used to store information used during clustering.
  */
-static void alloc_and_load_pb_stats(t_pb* pb, const int feasible_block_array_size) {
+static void alloc_and_load_pb_stats(t_pb* pb) {
     /* Call this routine when starting to fill up a new cluster.  It resets *
      * the gain vector, etc.                                                */
 
@@ -90,29 +89,8 @@ static void alloc_and_load_pb_stats(t_pb* pb, const int feasible_block_array_siz
     pb->pb_stats->output_pins_used = std::vector<std::unordered_map<size_t, AtomNetId>>(pb->pb_graph_node->num_output_pin_class);
     pb->pb_stats->lookahead_input_pins_used = std::vector<std::vector<AtomNetId>>(pb->pb_graph_node->num_input_pin_class);
     pb->pb_stats->lookahead_output_pins_used = std::vector<std::vector<AtomNetId>>(pb->pb_graph_node->num_output_pin_class);
-    pb->pb_stats->num_feasible_blocks = NOT_VALID;
-    pb->pb_stats->feasible_blocks = new t_pack_molecule*[feasible_block_array_size];
-
-    for (int i = 0; i < feasible_block_array_size; i++)
-        pb->pb_stats->feasible_blocks[i] = nullptr;
-
-    pb->pb_stats->tie_break_high_fanout_net = AtomNetId::INVALID();
-
-    pb->pb_stats->pulled_from_atom_groups = 0;
-    pb->pb_stats->num_att_group_atoms_used = 0;
-
-    pb->pb_stats->gain.clear();
-    pb->pb_stats->timinggain.clear();
-    pb->pb_stats->connectiongain.clear();
-    pb->pb_stats->sharinggain.clear();
-    pb->pb_stats->hillgain.clear();
-    pb->pb_stats->transitive_fanout_candidates.clear();
-
-    pb->pb_stats->num_pins_of_net_in_pb.clear();
 
     pb->pb_stats->num_child_blocks_in_pb = 0;
-
-    pb->pb_stats->explore_transitive_fanout = true;
 }
 
 /*
@@ -173,22 +151,6 @@ static void free_pb_stats_recursive(t_pb* pb) {
             }
         }
         free_pb_stats(pb);
-    }
-}
-
-/* Record the failure of the molecule in this cluster in the current pb stats.
- * If a molecule fails repeatedly, it's gain will be penalized if packing with
- * attraction groups on. */
-static void record_molecule_failure(t_pack_molecule* molecule, t_pb* pb) {
-    //Only have to record the failure for the first atom in the molecule.
-    //The convention when checking if a molecule has failed to pack in the cluster
-    //is to check whether the first atoms has been recorded as having failed
-
-    auto got = pb->pb_stats->atom_failures.find(molecule->atom_block_ids[0]);
-    if (got == pb->pb_stats->atom_failures.end()) {
-        pb->pb_stats->atom_failures.insert({molecule->atom_block_ids[0], 1});
-    } else {
-        got->second++;
     }
 }
 
@@ -572,7 +534,7 @@ try_place_atom_block_rec(const t_pb_graph_node* pb_graph_node,
     *parent = pb; /* this pb is parent of it's child that called this function */
     VTR_ASSERT(pb->pb_graph_node == pb_graph_node);
     if (pb->pb_stats == nullptr) {
-        alloc_and_load_pb_stats(pb, feasible_block_array_size);
+        alloc_and_load_pb_stats(pb);
     }
     const t_pb_type* pb_type = pb_graph_node->pb_type;
 
@@ -998,11 +960,35 @@ static void update_molecule_chain_info(t_pack_molecule* chain_molecule, const t_
 }
 
 /*
+ * @brief Reset molecule information created while trying to cluster it.
+ *
+ * This code only resets information that has to do with long chains.
+ *
+ * TODO: This information should not be stored in the molecule, but should be
+ *       stored in the ClusterLegalizer class instead.
+ *
+ * TODO: This code may be removable. Tried turning it off and found no test
+ *       failures or QoR degredations. Should be investigated in more detail.
+ */
+static void reset_molecule_info(t_pack_molecule* mol) {
+    // when invalidating a molecule check if it's a chain molecule
+    // that is part of a long chain. If so, check if this molecule
+    // has modified the chain_id value based on the stale packing
+    // then reset the chain id and the first packed molecule pointer
+    // this is packing is being reset
+    if (mol->is_chain()
+            && mol->chain_info->is_long_chain
+            && mol->chain_info->first_packed_molecule == mol) {
+        mol->chain_info->first_packed_molecule = nullptr;
+        mol->chain_info->chain_id = -1;
+    }
+}
+
+/*
  * @brief Revert trial atom block iblock and free up memory space accordingly.
  */
 static void revert_place_atom_block(const AtomBlockId blk_id,
                                     t_lb_router_data* router_data,
-                                    const Prepacker& prepacker,
                                     vtr::vector_map<AtomBlockId, LegalizationClusterId>& atom_cluster) {
     const AtomContext& atom_ctx = g_vpr_ctx.atom();
     AtomContext& mutable_atom_ctx = g_vpr_ctx.mutable_atom();
@@ -1020,7 +1006,6 @@ static void revert_place_atom_block(const AtomBlockId blk_id,
          */
 
         t_pb* next = pb->parent_pb;
-        revalid_molecules(pb, prepacker);
         free_pb(pb);
         pb = next;
 
@@ -1037,7 +1022,6 @@ static void revert_place_atom_block(const AtomBlockId blk_id,
                     /* If the code gets here, then that means that placing the initial seed molecule
                      * failed, don't free the actual complex block itself as the seed needs to find
                      * another placement */
-                    revalid_molecules(pb, prepacker);
                     free_pb(pb);
                 }
             }
@@ -1194,9 +1178,6 @@ e_block_pack_status ClusterLegalizer::try_pack_molecule(t_pack_molecule* molecul
     // macros that limit placement flexibility.
     if (cluster.placement_stats->has_long_chain && molecule->is_chain() && molecule->chain_info->is_long_chain) {
         VTR_LOGV(log_verbosity_ > 4, "\t\t\tFAILED Placement Feasibility Filter: Only one long chain per cluster is allowed\n");
-        //Record the failure of this molecule in the current pb stats
-        record_molecule_failure(molecule, cluster.pb);
-        // Free the allocated data.
         return e_block_pack_status::BLK_FAILED_FEASIBLE;
     }
 
@@ -1218,8 +1199,6 @@ e_block_pack_status ClusterLegalizer::try_pack_molecule(t_pack_molecule* molecul
                                                                            log_verbosity_,
                                                                            cluster_pr_needs_update);
             if (!block_pack_floorplan_status) {
-                // Record the failure of this molecule in the current pb stats
-                record_molecule_failure(molecule, cluster.pb);
                 return e_block_pack_status::BLK_FAILED_FLOORPLANNING;
             }
 
@@ -1240,8 +1219,6 @@ e_block_pack_status ClusterLegalizer::try_pack_molecule(t_pack_molecule* molecul
                                                                      atom_noc_grp_id_,
                                                                      log_verbosity_);
             if (!block_pack_noc_grp_status) {
-                // Record the failure of this molecule in the current pb stats
-                record_molecule_failure(molecule, cluster.pb);
                 return e_block_pack_status::BLK_FAILED_NOC_GROUP;
             }
         }
@@ -1386,14 +1363,6 @@ e_block_pack_status ClusterLegalizer::try_pack_molecule(t_pack_molecule* molecul
                     if (!atom_blk_id.is_valid())
                         continue;
 
-                    /* invalidate all molecules that share atom block with current molecule */
-                    t_pack_molecule* cur_molecule = prepacker_.get_atom_molecule(atom_blk_id);
-                    // TODO: This should really be named better. Something like
-                    //       "is_clustered". and then it should be set to true.
-                    //       Right now, valid implies "not clustered" which is
-                    //       confusing.
-                    cur_molecule->valid = false;
-
                     commit_primitive(cluster.placement_stats, primitives_list[i]);
 
                     atom_cluster_[atom_blk_id] = cluster_id;
@@ -1424,12 +1393,10 @@ e_block_pack_status ClusterLegalizer::try_pack_molecule(t_pack_molecule* molecul
             for (int i = 0; i < failed_location; i++) {
                 AtomBlockId atom_blk_id = molecule->atom_block_ids[i];
                 if (atom_blk_id) {
-                    revert_place_atom_block(atom_blk_id, cluster.router_data, prepacker_, atom_cluster_);
+                    revert_place_atom_block(atom_blk_id, cluster.router_data, atom_cluster_);
                 }
             }
-
-            // Record the failure of this molecule in the current pb stats
-            record_molecule_failure(molecule, cluster.pb);
+            reset_molecule_info(molecule);
 
             /* Packing failed, but a part of the pb tree is still allocated and pbs have their modes set.
              * Before trying to pack next molecule the unused pbs need to be freed and, the most important,
@@ -1466,7 +1433,7 @@ ClusterLegalizer::start_new_cluster(t_pack_molecule* molecule,
     // Create the physical block for this cluster based on the type.
     t_pb* cluster_pb = new t_pb;
     cluster_pb->pb_graph_node = cluster_type->pb_graph_head;
-    alloc_and_load_pb_stats(cluster_pb, feasible_block_array_size_);
+    alloc_and_load_pb_stats(cluster_pb);
     cluster_pb->parent_pb = nullptr;
     cluster_pb->mode = cluster_mode;
 
@@ -1562,19 +1529,15 @@ void ClusterLegalizer::destroy_cluster(LegalizationClusterId cluster_id) {
         VTR_ASSERT_SAFE(molecule_cluster_.find(mol) != molecule_cluster_.end() &&
                         molecule_cluster_[mol] == cluster_id);
         molecule_cluster_[mol] = LegalizationClusterId::INVALID();
-        // The overall clustering algorithm uses this valid flag to indicate
-        // that a molecule has not been packed (clustered) yet. Since we are
-        // destroying a cluster, all of its molecules are now no longer clustered
-        // so they are all validated.
-        mol->valid = true;
         // Revert the placement of all blocks in the molecule.
         int molecule_size = get_array_size_of_molecule(mol);
         for (int i = 0; i < molecule_size; i++) {
             AtomBlockId atom_blk_id = mol->atom_block_ids[i];
             if (atom_blk_id) {
-                revert_place_atom_block(atom_blk_id, cluster.router_data, prepacker_, atom_cluster_);
+                revert_place_atom_block(atom_blk_id, cluster.router_data, atom_cluster_);
             }
         }
+        reset_molecule_info(mol);
     }
     cluster.molecules.clear();
     // Free the rest of the cluster data.
@@ -1808,6 +1771,20 @@ bool ClusterLegalizer::is_molecule_compatible(t_pack_molecule* molecule,
     // TODO: Maybe add some more quick checks to save time, such as PR or NoC
     //       groups.
     return true;
+}
+
+size_t ClusterLegalizer::get_num_cluster_inputs_available(
+                                        LegalizationClusterId cluster_id) const {
+    VTR_ASSERT_SAFE(cluster_id.is_valid() && (size_t)cluster_id < legalization_clusters_.size());
+    const LegalizationCluster& cluster = legalization_clusters_[cluster_id];
+
+    // Count the number of inputs available per pin class.
+    size_t inputs_avail = 0;
+    for (int i = 0; i < cluster.pb->pb_graph_node->num_input_pin_class; i++) {
+        inputs_avail += cluster.pb->pb_stats->input_pins_used[i].size();
+    }
+
+    return inputs_avail;
 }
 
 void ClusterLegalizer::finalize() {

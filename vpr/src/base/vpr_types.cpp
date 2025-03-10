@@ -37,7 +37,7 @@ t_ext_pin_util_targets::t_ext_pin_util_targets(const std::vector<std::string>& s
         //input pin utilization target which is high, but less than 100%.
         if (logic_block_type != nullptr) {
             constexpr float LOGIC_BLOCK_TYPE_AUTO_INPUT_UTIL = 0.8;
-            constexpr float LOGIC_BLOCK_TYPE_AUTO_OUTPUT_UTIL = 1.0;
+            constexpr float LOGIC_BLOCK_TYPE_AUTO_OUTPUT_UTIL = 0.6;
 
             t_ext_pin_util logic_block_ext_pin_util(LOGIC_BLOCK_TYPE_AUTO_INPUT_UTIL, LOGIC_BLOCK_TYPE_AUTO_OUTPUT_UTIL);
 
@@ -139,7 +139,7 @@ std::string t_ext_pin_util_targets::to_string() const {
     for (unsigned int itype = 0; itype < device_ctx.physical_tile_types.size(); ++itype) {
         if (is_empty_type(&device_ctx.physical_tile_types[itype])) continue;
 
-        auto blk_name = device_ctx.physical_tile_types[itype].name;
+        const std::string& blk_name = device_ctx.physical_tile_types[itype].name;
 
         ss << blk_name << ":";
 
@@ -264,7 +264,7 @@ std::string t_pack_high_fanout_thresholds::to_string() const {
     for (unsigned int itype = 0; itype < device_ctx.physical_tile_types.size(); ++itype) {
         if (is_empty_type(&device_ctx.physical_tile_types[itype])) continue;
 
-        auto blk_name = device_ctx.physical_tile_types[itype].name;
+        const std::string& blk_name = device_ctx.physical_tile_types[itype].name;
 
         ss << blk_name << ":";
 

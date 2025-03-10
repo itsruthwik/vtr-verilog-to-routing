@@ -1165,7 +1165,7 @@ void dump_track_to_pin_map(t_track_to_pin_lookup& track_to_pin_map,
                         for (int width = 0; width < types[i].width; ++width) {
                             for (int height = 0; height < types[i].height; ++height) {
                                 for (int side = 0; side < 4; ++side) {
-                                    fprintf(fp, "\nTYPE:%s width:%d height:%d layer:%d\n", types[i].name, width, height, layer);
+                                    fprintf(fp, "\nTYPE:%s width:%d height:%d layer:%d\n", types[i].name.c_str(), width, height, layer);
                                     fprintf(fp, "\nSIDE:%d TRACK:%d \n", side, track);
                                     for (size_t con = 0; con < track_to_pin_map[i][track][width][height][layer][side].size(); con++) {
                                         fprintf(fp, "%d ", track_to_pin_map[i][track][width][height][layer][side][con]);
@@ -1708,8 +1708,10 @@ bool verify_rr_node_indices(const DeviceGrid& grid,
                                           y,
                                           describe_rr_node(rr_graph, grid, rr_indexed_data, inode, is_flat).c_str());
                             }
-                        } else if (rr_graph.node_type(inode) == SOURCE || rr_graph.node_type(inode) == SINK) {
+
+                        } else if (rr_graph.node_type(inode) == SOURCE || rr_graph.node_type(inode) == SINK || rr_graph.node_type(inode) == MEDIUM) {
                             // Sources have co-ordinates covering the entire block they are in, but not sinks
+
                             if (!rr_graph.x_in_node_range(x, inode)) {
                                 VPR_ERROR(VPR_ERROR_ROUTE, "RR node x positions do not agree between rr_nodes (%d <-> %d) and rr_node_indices (%d): %s",
                                           rr_graph.node_xlow(inode),
@@ -1776,7 +1778,7 @@ bool verify_rr_node_indices(const DeviceGrid& grid,
 
         auto& rr_node = rr_nodes[size_t(inode)];
 
-        if (rr_graph.node_type(inode) == SOURCE || rr_graph.node_type(inode) == SINK) {
+        if (rr_graph.node_type(inode) == SOURCE || rr_graph.node_type(inode) == SINK || rr_graph.node_type(inode) == MEDIUM) {
             int rr_width = (rr_graph.node_xhigh(rr_node.id()) - rr_graph.node_xlow(rr_node.id()) + 1);
             int rr_height = (rr_graph.node_yhigh(rr_node.id()) - rr_graph.node_ylow(rr_node.id()) + 1);
             int rr_area = rr_width * rr_height;

@@ -142,6 +142,9 @@ struct DeviceContext : public Context {
      * in this data structure should be used.
      */
     DeviceGrid grid;
+
+    VibDeviceGrid vib_grid;
+
     /*
      * Empty types
      */
@@ -367,9 +370,6 @@ struct PlacementContext : public Context {
      * make the block location information accessible for subsequent stages.
      */
     void unlock_loc_vars() { VTR_ASSERT_SAFE(!loc_vars_are_accessible_); loc_vars_are_accessible_ = true; }
-
-    ///@brief The pl_macros array stores all the placement macros (usually carry chains).
-    std::vector<t_pl_macro> pl_macros;
 
     ///@brief Stores ClusterBlockId of all movable clustered blocks (blocks that are not locked down to a single location)
     std::vector<ClusterBlockId> movable_blocks;

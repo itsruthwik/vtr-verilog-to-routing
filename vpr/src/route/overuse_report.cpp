@@ -219,8 +219,18 @@ static void report_overused_ipin_opin(std::ostream& os,
         grid_x == rr_graph.node_xhigh(node_id) && grid_y == rr_graph.node_yhigh(node_id),
         "Non-track RR node should not span across multiple grid blocks.");
 
+    t_physical_tile_type_ptr physical_tile = device_ctx.grid.get_physical_type({grid_x, grid_y, grid_layer});
+    const VibInf* vib;
+    if (!device_ctx.arch->vib_infs.empty()) {
+        vib = device_ctx.vib_grid.get_vib(grid_layer, grid_x, grid_y);
+    }
+    else {
+        vib = nullptr;
+    }
+    //const t_vib_inf* vib = device_ctx.vib_grid[grid_layer][grid_x][grid_y];
     os << "Pin physical number = " << rr_graph.node_pin_num(node_id) << '\n';
-    if (is_inter_cluster_node(rr_graph, node_id)) {
+    if (is_inter_cluster_node(physical_tile, vib, rr_graph.node_type(node_id), rr_graph.node_ptc_num(node_id))) {
+
         os << "On Tile Pin"
            << "\n";
     } else {
@@ -256,7 +266,7 @@ static void report_overused_ipin_opin(std::ostream& os,
 
         //Print out the block index, name and type
         // TODO: Needs to be updated when RR Graph Nodes know their layer_num
-        ClusterBlockId block_id = grid_info.block_at_location({grid_x, grid_y, isubtile, 0});
+        ClusterBlockId block_id = grid_info.block_at_location({grid_x, grid_y, isubtile, grid_layer});
         os << "Block #" << iblock << ": ";
         os << "Block name = " << clb_nlist.block_pb(block_id)->name << ", ";
         os << "Block type = " << clb_nlist.block_type(block_id)->name << '\n';
@@ -418,7 +428,7 @@ static void log_single_overused_node_status(int overuse_index, RRNodeId node_id)
     VTR_LOG(" %7d", rr_graph.node_ptc_num(node_id));
 
     // Block Name
-    VTR_LOG(" %7s", physical_blk->name);
+    VTR_LOG(" %7s", physical_blk->name.c_str());
 
     //X_low
     VTR_LOG(" %7d", x);

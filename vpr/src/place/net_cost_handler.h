@@ -10,6 +10,7 @@
 #include "timing_place.h"
 #include "move_transactions.h"
 #include "place_util.h"
+#include "vtr_ndoffsetmatrix.h"
 
 #include <functional>
 
@@ -42,11 +43,11 @@ class NetCostHandler {
      * are affected by a move and data needed per net about where their terminals are in order to quickly (incrementally) update
      * their wirelength costs. These data structures are (layer_)ts_bb_edge_new, (layer_)ts_bb_coord_new, ts_layer_sink_pin_count,
      * and ts_nets_to_update.
-     * @param num_nets Number of nets in the netlist used by the placement engine (currently clustered netlist)
+     * @param placer_opts Contains some parameters that determine how the bounding box is computed.
+     * @param placer_state Contains information about block locations and net bounding boxes.
      * @param cube_bb True if the 3D bounding box should be used, false otherwise.
-     * @param place_cost_exp It is an exponent to which you take the average inverse channel
      */
-    NetCostHandler(const t_placer_opts& placer_opts, PlacerState& placer_state, size_t num_nets, bool cube_bb);
+    NetCostHandler(const t_placer_opts& placer_opts, PlacerState& placer_state, bool cube_bb);
 
     /**
      * @brief Finds the bb cost from scratch.
@@ -121,7 +122,9 @@ class NetCostHandler {
 
   private:
     ///@brief Specifies whether the bounding box is computed using cube method or per-layer method.
-    bool cube_bb_ = false;
+    bool cube_bb_;
+    ///@brief Determines whether the FPGA has multiple dies (layers)
+    bool is_multi_layer_;
     ///@brief A reference to the placer's state to be updated by this object.
     PlacerState& placer_state_;
     ///@brief Contains some parameter that determine how the placement cost is computed.
@@ -186,14 +189,24 @@ class NetCostHandler {
     /**
      * @brief Matrices below are used to precompute the inverse of the average
      * number of tracks per channel between [subhigh] and [sublow].  Access
-     * them as chan?_place_cost_fac[subhigh][sublow].  They are used to
+     * them as chan?_place_cost_fac(subhigh, sublow).  They are used to
      * speed up the computation of the cost function that takes the length
      * of the net bounding box in each dimension, divided by the average
      * number of tracks in that direction; for other cost functions they
      * will never be used.
      */
-    vtr::NdMatrix<float, 2> chanx_place_cost_fac_; // [0...device_ctx.grid.width()-2]
-    vtr::NdMatrix<float, 2> chany_place_cost_fac_; // [0...device_ctx.grid.height()-2]
+    vtr::NdOffsetMatrix<int, 1> acc_chanx_width_; // [-1...device_ctx.grid.width()-1]
+    vtr::NdOffsetMatrix<int, 1> acc_chany_width_; // [-1...device_ctx.grid.height()-1]
+
+    /**
+     * @brief The matrix below is used to calculate a chanz_place_cost_fac based on the average channel width in 
+     * the cross-die-layer direction over a 2D (x,y) region. We don't assume the inter-die connectivity is the same at all (x,y) locations, so we
+     * can't compute the full chanz_place_cost_fac for all possible (xlow,ylow)(xhigh,yhigh) without a 4D array, which would
+     * be too big: O(n^2) in circuit size. Instead we compute a prefix sum that stores the number of inter-die connections per layer from
+     * (x=0,y=0) to (x,y). Given this, we can compute the average number of inter-die connections over a (xlow,ylow) to (xhigh,yhigh) 
+     * region in O(1) (by adding and subtracting 4 entries)
+     */
+    vtr::NdMatrix<int, 2> acc_tile_num_inter_die_conn_; // [0..grid_width-1][0..grid_height-1]
 
 
   private:
@@ -236,10 +249,23 @@ class NetCostHandler {
     /**
      * @brief Allocates and loads the chanx_place_cost_fac and chany_place_cost_fac arrays with the inverse of
      * the average number of tracks per channel between [subhigh] and [sublow].
-     * @param place_cost_exp It is an exponent to which you take the average inverse channel capacity;
-     * a higher value would favour wider channels more over narrower channels during placement (usually we use 1).
+     *
+     * @details This is only useful for the cost function that takes the length of the net bounding box in each
+     * dimension divided by the average number of tracks in that direction. For other cost functions, you don't
+     * have to bother calling this routine; when using the cost function described above, however, you must always
+     * call this routine before you do any placement cost determination. The place_cost_exp factor specifies to
+     * what power the width of the channel should be taken -- larger numbers make narrower channels more expensive.
      */
-    void alloc_and_load_chan_w_factors_for_place_cost_(float place_cost_exp);
+    void alloc_and_load_chan_w_factors_for_place_cost_();
+
+    /**
+    * @brief Allocates and loads acc_tile_num_inter_die_conn_ which contains the accumulative number of inter-die
+    * conntections.
+    *
+    * @details This is only useful for multi-die FPGAs. The place_cost_exp factor specifies to
+    * what power the average number of inter-die connections should be take -- larger numbers make narrower channels more expensive.
+    */
+    void alloc_and_load_for_fast_vertical_cost_update_();
 
     /**
      * @brief Calculate the new connection delay and timing cost of all the
@@ -376,7 +402,6 @@ class NetCostHandler {
      * @param old_edge_coord The current known bounding box of the net
      * @param new_num_block_on_edge The new bb calculated by this function
      * @param new_edge_coord The new bb edge calculated by this function
-     *
      */
     inline void update_bb_edge_(ClusterNetId net_id,
                                 std::vector<t_2D_bb>& bb_edge_new,
@@ -421,13 +446,13 @@ class NetCostHandler {
      * @param bb_coord_new The new bb calculated by this function
      */
      inline void update_bb_same_layer_(ClusterNetId net_id,
-                                             const t_physical_tile_loc& pin_old_loc,
-                                             const t_physical_tile_loc& pin_new_loc,
-                                             const std::vector<t_2D_bb>& curr_bb_edge,
-                                             const std::vector<t_2D_bb>& curr_bb_coord,
-                                             vtr::NdMatrixProxy<int, 1> bb_pin_sink_count_new,
-                                             std::vector<t_2D_bb>& bb_edge_new,
-                                             std::vector<t_2D_bb>& bb_coord_new);
+                                       const t_physical_tile_loc& pin_old_loc,
+                                       const t_physical_tile_loc& pin_new_loc,
+                                       const std::vector<t_2D_bb>& curr_bb_edge,
+                                       const std::vector<t_2D_bb>& curr_bb_coord,
+                                       vtr::NdMatrixProxy<int, 1> bb_pin_sink_count_new,
+                                       std::vector<t_2D_bb>& bb_edge_new,
+                                       std::vector<t_2D_bb>& bb_coord_new);
 
      /**
       * @brief Computes the bounding box from scratch using 2D bounding boxes (per-layer mode)
@@ -484,5 +509,38 @@ class NetCostHandler {
      * @return Wirelength estimate of the net
      */
     double get_net_wirelength_from_layer_bb_(ClusterNetId net_id);
+
+    /**
+     * @brief Computes the inverse of average channel width for horizontal and
+     * vertical channels within a bounding box.
+     * @tparam BBT This can be either t_bb or t_2D_bb.
+     * @param bb The bounding box for which the inverse of average channel width
+     * within the bounding box is computed.
+     * @return std::pair<double, double>
+     *         first  -> The inverse of average channel width for horizontal channels.
+     *         second -> The inverse of average channel width for vertical channels.
+     */
+    template<typename BBT>
+    std::pair<double, double> get_chanxy_cost_fac_(const BBT& bb) {
+        const int total_chanx_width = acc_chanx_width_[bb.ymax] - acc_chanx_width_[bb.ymin - 1];
+        const double inverse_average_chanx_width = (bb.ymax - bb.ymin + 1.0) / total_chanx_width;
+
+        const int total_chany_width = acc_chany_width_[bb.xmax] - acc_chany_width_[bb.xmin - 1];
+        const double inverse_average_chany_width = (bb.xmax - bb.xmin + 1.0) / total_chany_width;
+
+        return {inverse_average_chanx_width, inverse_average_chany_width};
+    }
+
+    /**
+     * @brief Calculate the chanz cost factor based on the inverse of the average number of inter-die connections 
+     * in the given bounding box. This cost factor increases the placement cost for blocks that require inter-layer 
+     * connections in areas with, on average, fewer inter-die connections. If inter-die connections are evenly 
+     * distributed across tiles, the cost factor will be the same for all bounding boxes, but it will still 
+     * weight z-directed vs. x- and y-directed connections appropriately.
+     *
+     * @param bb Bounding box of the net which chanz cost factor is to be calculated
+     * @return ChanZ cost factor
+     */
+     float get_chanz_cost_factor_(const t_bb& bb);
 
 };
