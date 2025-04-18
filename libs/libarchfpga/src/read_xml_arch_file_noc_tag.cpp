@@ -442,6 +442,7 @@ static void process_router(pugi::xml_node router_tag,
 
     router_info.device_y_position = pugiutil::get_attribute(router_tag, "positiony", loc_data, pugiutil::REQUIRED).as_double(ATTRIBUTE_CONVERSION_FAILURE);
 
+    router_info.device_layer_position = 0;
     // verify whether the attribute information was legal
     if ((router_info.id < 0) || (router_info.device_x_position < 0) || (router_info.device_y_position < 0)) {
         archfpga_throw(loc_data.filename_c_str(), loc_data.line(router_tag),
